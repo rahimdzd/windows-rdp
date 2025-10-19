@@ -1,0 +1,63 @@
+name: Windows 10 RDP (Germany)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  setup-rdp:
+    runs-on: windows-latest
+    timeout-minutes: 3600
+
+    steps:
+      - name: Enable RDP Access
+        run: |
+          # Enable Remote Desktop
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
+            -Name "fDenyTSConnections" -Value 0 -Force
+
+          # Disable Network Level Authentication (optional)
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+            -Name "UserAuthentication" -Value 0 -Force
+
+          # Create Firewall Rule for your IP
+          netsh advfirewall firewall delete rule name="Allow RDP from Home" | Out-Null
+          netsh advfirewall firewall add rule name="Allow RDP from Home" `
+            dir=in action=allow protocol=TCP localport=3389 remoteip=105.109.103.43
+
+          # Block all other IPs
+          netsh advfirewall firewall delete rule name="Block Other RDP Access" | Out-Null
+          netsh advfirewall firewall add rule name="Block Other RDP Access" `
+            dir=in action=block protocol=TCP localport=3389 remoteip=any
+
+          # Restart RDP Service
+          Restart-Service -Name TermService -Force
+
+      - name: Create RDP User
+        run: |
+          $password = [System.Web.Security.Membership]::GeneratePassword(16,3)
+          $secure = ConvertTo-SecureString $password -AsPlainText -Force
+          New-LocalUser -Name "RDP" -Password $secure -AccountNeverExpires
+          Add-LocalGroupMember -Group "Administrators" -Member "RDP"
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
+          echo "RDP Username: RDP" >> $env:GITHUB_ENV
+          echo "RDP Password: $password" >> $env:GITHUB_ENV
+          Write-Host "✅ Created user 'RDP' with password: $password"
+
+      - name: Show Connection Info
+        run: |
+          $ip = (Invoke-RestMethod -Uri "https://api.ipify.org")
+          Write-Host "=============================================="
+          Write-Host "✅ Your Windows 10 RDP is ready!"
+          Write-Host "🌍 Public IP: $ip"
+          Write-Host "👤 Username: RDP"
+          Write-Host "🔑 Password: $env:RDP_Password"
+          Write-Host "💡 Only your home IP (105.109.103.43) can connect."
+          Write-Host "=============================================="
+          Write-Host "`nKeep this workflow running to keep RDP active!"
+
+      - name: Keep RDP Alive
+        run: |
+          while ($true) {
+            Write-Host "[$(Get-Date)] RDP running..."
+            Start-Sleep -Seconds 300
+          }
